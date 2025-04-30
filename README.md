@@ -52,6 +52,7 @@ Git-fleximod is a Python-based tool that extends Git's submodule and sparse chec
 
 ## Examples
 
+
 Here are some common usage examples:
 
 Update all submodules, including optional ones:
