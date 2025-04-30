@@ -9,7 +9,6 @@ import os
 import shutil
 import logging
 import textwrap
-import asyncio
 from git_fleximod import utils
 from git_fleximod import cli
 from git_fleximod.gitinterface import GitInterface
@@ -219,45 +218,41 @@ def git_toplevelroot(root_dir, logger):
     _, superroot = rgit.git_operation("rev-parse", "--show-superproject-working-tree")
     return superroot
 
-async def process_submodule(submod, gitmodules, root_dir, requiredlist, force):
-    _, needsupdate, localmods, testfails = submod.status()
-    if not submod.fxrequired:
-        submod.fxrequired = "AlwaysRequired"
-    fxrequired = submod.fxrequired    
-    allowedvalues = fxrequired_allowed_values()
-    assert fxrequired in allowedvalues
-
-    superroot = git_toplevelroot(root_dir, logger)
-
-    if (
-        fxrequired
-        and ((superroot and "Toplevel" in fxrequired)
-        or fxrequired not in requiredlist)
-    ):
-        if "Optional" in fxrequired and "Optional" not in requiredlist:
-            if fxrequired.startswith("Always"):
-                print(f"Skipping optional component {submod.name:>20}")
-            return
-    optional = "AlwaysOptional" in requiredlist
-
-    if fxrequired in requiredlist:
-        await asyncio.to_thread(submod.update)
-        repodir = os.path.join(root_dir, submod.path)
-        if os.path.exists(os.path.join(repodir, ".gitmodules")):
-            # recursively handle this checkout
-            print(f"Recursively checking out submodules of {submod.name}")
-            gitsubmodules = GitModules(submod.logger, confpath=repodir)
-            newrequiredlist = ["AlwaysRequired"]
-            if optional:
-                newrequiredlist.append("AlwaysOptional")
-            await submodules_update(gitsubmodules, repodir, newrequiredlist, force=force)
-
-async def submodules_update(gitmodules, root_dir, requiredlist, force):
-    tasks = []
+def submodules_update(gitmodules, root_dir, requiredlist, force):
     for name in gitmodules.sections():
         submod = init_submodule_from_gitmodules(gitmodules, name, root_dir, logger)
-        tasks.append(process_submodule(submod, gitmodules, root_dir, requiredlist, force))
-    await asyncio.gather(*tasks)
+    
+        _, needsupdate, localmods, testfails = submod.status()
+        if not submod.fxrequired:
+            submod.fxrequired = "AlwaysRequired"
+        fxrequired = submod.fxrequired    
+        allowedvalues = fxrequired_allowed_values()
+        assert fxrequired in allowedvalues
+
+        superroot = git_toplevelroot(root_dir, logger)
+                                     
+        if (
+            fxrequired
+            and ((superroot and "Toplevel" in fxrequired)
+            or fxrequired not in requiredlist)
+        ):
+            if "Optional" in fxrequired and "Optional" not in requiredlist:
+                if fxrequired.startswith("Always"):
+                    print(f"Skipping optional component {name:>20}")
+                continue
+        optional = "AlwaysOptional" in requiredlist
+
+        if fxrequired in requiredlist:
+            submod.update()
+            repodir = os.path.join(root_dir, submod.path)
+            if os.path.exists(os.path.join(repodir, ".gitmodules")):
+                # recursively handle this checkout
+                print(f"Recursively checking out submodules of {name}")
+                gitsubmodules = GitModules(submod.logger, confpath=repodir)
+                newrequiredlist = ["AlwaysRequired"]
+                if optional:
+                    newrequiredlist.append("AlwaysOptional")
+                submodules_update(gitsubmodules, repodir, newrequiredlist, force=force)
 
 def local_mods_output():
     text = """\
@@ -351,7 +346,7 @@ def main():
         sys.exit(f"No submodule components found, root_dir={root_dir}")
     retval = 0
     if action == "update":
-        asyncio.run(submodules_update(gitmodules, root_dir, fxrequired, force))
+        submodules_update(gitmodules, root_dir, fxrequired, force)
     elif action == "status":
         tfails, lmods, updates = submodules_status(gitmodules, root_dir, toplevel=True)
         if tfails + lmods + updates > 0:
